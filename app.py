@@ -8,7 +8,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-DEFAULT_DATA_PATH = Path(__file__).resolve().parent / "ENERGY DATA SET 01" / "Indias_Electricity_Consumption_Dataset.csv"
+# Use the workspace `data/UP_electricity_consumption.csv` by default if present
+DEFAULT_DATA_PATH = Path(__file__).resolve().parent / "data" / "UP_electricity_consumption.csv"
 
 THEME = {
     "bg": "#0F172A",
