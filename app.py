@@ -449,15 +449,15 @@ def render_overview(df: pd.DataFrame) -> None:
 
     chart1, chart2 = st.columns(2)
     with chart1:
-        st.plotly_chart(build_daily_trend(df), use_container_width=True)
+        st.plotly_chart(build_daily_trend(df), width="stretch")
     with chart2:
-        st.plotly_chart(build_monthly_average_chart(df), use_container_width=True)
+        st.plotly_chart(build_monthly_average_chart(df), width="stretch")
 
-    st.plotly_chart(build_yearly_trend(df), use_container_width=True)
-    st.plotly_chart(build_seasonality_heatmap(df), use_container_width=True)
+    st.plotly_chart(build_yearly_trend(df), width="stretch")
+    st.plotly_chart(build_seasonality_heatmap(df), width="stretch")
 
     st.caption("Top 10 highest-consumption days")
-    st.dataframe(build_top_days_table(df), use_container_width=True, hide_index=True)
+    st.dataframe(build_top_days_table(df), width="stretch", hide_index=True)
 
 
 def render_insights(df: pd.DataFrame) -> None:
