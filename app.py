@@ -1,4 +1,4 @@
-﻿import json
+import json
 import re
 import urllib.request
 from datetime import timedelta
@@ -13,6 +13,7 @@ import streamlit as st
 
 DEFAULT_DATA_PATH = Path(__file__).resolve().parent / "data" / "Indias_Electricity_Consumption_.csv"
 FALLBACK_DATA_PATH = Path(__file__).resolve().parent / "data" / "UP_electricity_consumption.csv"
+LOCAL_GEOJSON_PATH = Path(__file__).resolve().parent / "data" / "india_states.geojson"
 
 THEME = {
     "bg": "#0F172A",
@@ -80,18 +81,21 @@ REGION_COORDINATES = {
 }
 
 INDIA_GEOJSON_SOURCES = [
-    "https://raw.githubusercontent.com/geohacker/india/master/state/india_state.geojson",
-    "https://raw.githubusercontent.com/datameet/maps/master/States_INDIA.geojson",
+    "https://gist.githubusercontent.com/jbrobst/56c13bbbf9d97d187fea01ca62ea5112/raw/e388c4cae20aa53cb5090210a42ebb9b765c0a36/india_states.geojson"
 ]
 GEOJSON_STATE_KEY_CANDIDATES = [
+    "NAME_1",
     "st_nm",
     "STATE_NAME",
-    "NAME_1",
     "NAME",
     "state_name",
     "STATE",
     "ST_NM",
 ]
+
+# Maps normalized dataset column names → GeoJSON NAME_1 values.
+# Note: GeoJSON uses older names "Orissa" and "Uttaranchal"; Telangana
+# is merged into Andhra Pradesh in this GeoJSON vintage.
 INDIA_STATE_GEO_NAMES = {
     "andhrapradesh": "Andhra Pradesh",
     "arunachalpradesh": "Arunachal Pradesh",
@@ -104,7 +108,7 @@ INDIA_STATE_GEO_NAMES = {
     "gujarat": "Gujarat",
     "haryana": "Haryana",
     "hp": "Himachal Pradesh",
-    "jk": "Jammu and Kashmir",
+    "jk": "Jammu & Kashmir",
     "jharkhand": "Jharkhand",
     "karnataka": "Karnataka",
     "kerala": "Kerala",
@@ -125,13 +129,25 @@ INDIA_STATE_GEO_NAMES = {
     "up": "Uttar Pradesh",
     "uttarakhand": "Uttarakhand",
     "westbengal": "West Bengal",
-    "dd": "Daman and Diu",
-    "dnh": "Dadra and Nagar Haveli",
+    "dd": "Dadra and Nagar Haveli and Daman and Diu",
+    "dnh": "Dadra and Nagar Haveli and Daman and Diu",
 }
+
+# Entities in the dataset that are not geographic states/UTs.
+NON_GEOGRAPHIC_ENTITIES = {"dvc", "essarsteel"}
 
 
 @st.cache_data(show_spinner=False)
 def load_india_geojson() -> dict | None:
+    """Load India states GeoJSON — local file first, network fallback."""
+    if LOCAL_GEOJSON_PATH.exists():
+        try:
+            with open(LOCAL_GEOJSON_PATH, encoding="utf-8") as fh:
+                geojson = json.load(fh)
+                if geojson.get("features"):
+                    return geojson
+        except (ValueError, OSError):
+            pass
     for url in INDIA_GEOJSON_SOURCES:
         try:
             with urllib.request.urlopen(url, timeout=10) as response:
@@ -158,6 +174,7 @@ st.set_page_config(page_title="India Electricity Consumption Dashboard", page_ic
 st.markdown(
     f"""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     :root {{
         --bg: {THEME['bg']};
         --sidebar-bg: {THEME['sidebar_bg']};
@@ -168,6 +185,10 @@ st.markdown(
         --muted: {THEME['muted']};
         --border: {THEME['border']};
     }}
+    html, body, [data-testid="stAppViewContainer"], .stApp, .stMarkdown,
+    .stTextInput input, .stSelectbox, .stMultiSelect, button {{
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
     html, body, [data-testid="stAppViewContainer"] {{
         background: var(--bg);
         color: var(--text);
@@ -177,7 +198,7 @@ st.markdown(
         border-right: 1px solid var(--border);
     }}
     .stApp {{ background: var(--bg); }}
-    .block-container {{ padding-top: 1.8rem; padding-bottom: 1.8rem; }}
+    .block-container {{ padding-top: 1.5rem; padding-bottom: 1.5rem; }}
     [data-testid="stFileUploader"] {{
         background: var(--card-bg);
         border: 1px solid var(--border);
@@ -195,11 +216,14 @@ st.markdown(
         border: none;
         border-radius: 10px;
         padding: 0.55rem 0.9rem;
+        font-weight: 600;
         box-shadow: 0 10px 20px rgba(59, 130, 246, 0.18);
+        transition: all 0.2s ease;
     }}
     .stDownloadButton > button:hover, .stButton > button:hover {{
-        filter: brightness(1.05);
-        box-shadow: 0 12px 24px rgba(59, 130, 246, 0.24);
+        filter: brightness(1.08);
+        box-shadow: 0 12px 24px rgba(59, 130, 246, 0.28);
+        transform: translateY(-1px);
     }}
     .stTextInput > div > div > input, .stSelectbox > div > div > div, .stMultiSelect > div > div > div {{
         background: var(--card-bg);
@@ -214,13 +238,13 @@ st.markdown(
         background: var(--card-bg);
         color: var(--muted);
         border: 1px solid var(--border);
+        transition: all 0.2s ease;
     }}
     .stTabs [aria-selected="true"] {{
         background: linear-gradient(135deg, var(--accent) 0%, #2563eb 100%);
         color: white;
         border-color: var(--accent);
     }}
-    .block-container {{ padding-top: 1rem; padding-bottom: 1rem; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -500,6 +524,7 @@ def build_daily_trend(df: pd.DataFrame) -> go.Figure:
         xaxis_title="Date",
         yaxis_title="MW",
         legend_title_text="",
+        font=dict(family="Inter, sans-serif"),
     )
     return fig
 
@@ -522,13 +547,17 @@ def build_monthly_average_chart(df: pd.DataFrame) -> go.Figure:
         template="plotly_dark",
         title="Monthly Average Consumption",
         margin=dict(l=10, r=10, t=34, b=10),
-        height=280,
+        height=300,
         paper_bgcolor="#0F172A",
         plot_bgcolor="#0F172A",
         xaxis_title="Month",
         yaxis_title="Average MW",
+        font=dict(family="Inter, sans-serif"),
     )
-    fig.update_traces(hovertemplate="%{x}<br>%{y:,.2f} MW<extra></extra>")
+    fig.update_traces(
+        hovertemplate="%{x}<br>%{y:,.2f} MW<extra></extra>",
+        textfont_size=9,
+    )
     return fig
 
 
@@ -545,11 +574,12 @@ def build_yearly_trend(df: pd.DataFrame) -> go.Figure:
         template="plotly_dark",
         title="Yearly Consumption Trend",
         margin=dict(l=10, r=10, t=34, b=10),
-        height=280,
+        height=300,
         paper_bgcolor="#0F172A",
         plot_bgcolor="#0F172A",
         xaxis_title="Year",
         yaxis_title="Total MW",
+        font=dict(family="Inter, sans-serif"),
     )
     fig.update_traces(hovertemplate="%{x}<br>%{y:,.2f} MW<extra></extra>")
     return fig
@@ -560,15 +590,18 @@ def build_seasonality_heatmap(df: pd.DataFrame) -> go.Figure:
         df.assign(month_name=pd.Categorical(df["month_name"], categories=MONTH_ORDER, ordered=True))
         .pivot_table(index="year", columns="month_name", values="consumption_mw", aggfunc="mean")
         .reindex(columns=MONTH_ORDER)
-        .fillna(0)
     )
+    # Use NaN for missing data (shown as blank) instead of misleading zeros.
+    z_values = pivot.values.tolist()
     fig = go.Figure(
         data=go.Heatmap(
-            z=pivot.values,
-            x=pivot.columns,
-            y=pivot.index,
-            colorscale="Blues",
+            z=z_values,
+            x=list(pivot.columns),
+            y=list(pivot.index),
+            colorscale="Viridis",
             colorbar=dict(title="Average MW"),
+            hoverongaps=False,
+            hovertemplate="Year: %{y}<br>Month: %{x}<br>Avg: %{z:,.1f} MW<extra></extra>",
         )
     )
     fig.update_layout(
@@ -580,63 +613,179 @@ def build_seasonality_heatmap(df: pd.DataFrame) -> go.Figure:
         plot_bgcolor="#0F172A",
         xaxis_title="Month",
         yaxis_title="Year",
+        font=dict(family="Inter, sans-serif"),
     )
     return fig
 
 
 def build_region_map(df: pd.DataFrame) -> go.Figure:
+    """Build a full India choropleth map with UP emphasis."""
+    # --- aggregate consumption by region ---
     summary = (
         df.groupby(["region", "region_normalized"])["consumption_mw"]
         .sum()
         .reset_index()
         .sort_values("consumption_mw", ascending=False)
     )
-    summary["lat"] = summary["region_normalized"].map(lambda value: REGION_COORDINATES.get(value, {}).get("lat"))
-    summary["lon"] = summary["region_normalized"].map(lambda value: REGION_COORDINATES.get(value, {}).get("lon"))
     summary["geo_state"] = summary["region_normalized"].map(INDIA_STATE_GEO_NAMES)
-    choropleth_data = summary.dropna(subset=["geo_state"]).copy()
+
+    # Filter out non-geographic entities (DVC, Essar Steel)
+    geographic = summary[~summary["region_normalized"].isin(NON_GEOGRAPHIC_ENTITIES)].copy()
+    non_geo = summary[summary["region_normalized"].isin(NON_GEOGRAPHIC_ENTITIES)].copy()
+
+    # Aggregate regions mapped to the same GeoJSON state
+    choropleth_data = (
+        geographic.dropna(subset=["geo_state"])
+        .groupby("geo_state", as_index=False)["consumption_mw"]
+        .sum()
+        .sort_values("consumption_mw", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    # Add rank and formatted values for tooltips
+    choropleth_data["rank"] = range(1, len(choropleth_data) + 1)
+    total_consumption = choropleth_data["consumption_mw"].sum()
+    choropleth_data["pct_of_total"] = (
+        (choropleth_data["consumption_mw"] / total_consumption * 100).round(1)
+    )
+    choropleth_data["consumption_formatted"] = (
+        choropleth_data["consumption_mw"].apply(lambda v: f"{v:,.1f}")
+    )
+
     geojson = load_india_geojson()
     geo_prop = get_geojson_state_property(geojson) if geojson else None
 
     if geojson and geo_prop and not choropleth_data.empty:
-        fig = px.choropleth(
-            choropleth_data,
-            geojson=geojson,
-            locations="geo_state",
-            featureidkey=f"properties.{geo_prop}",
-            color="consumption_mw",
-            color_continuous_scale="Blues",
-            projection="natural earth",
-            scope="asia",
-            title="State/Region Consumption Map",
-            labels={"consumption_mw": "Total MW"},
-        )
-        fig.update_traces(
-            marker_line_width=0.9,
-            marker_line_color="#FFFFFF",
-            selector=dict(type="choropleth"),
-        )
-        fig.update_geos(fitbounds="locations", visible=False)
+        # --- build all-India GeoJSON state list ---
+        all_geo_states = [
+            feat["properties"][geo_prop]
+            for feat in geojson["features"]
+            if geo_prop in feat.get("properties", {})
+        ]
+        # Create a dataframe for every GeoJSON state so all states render
+        full_states = pd.DataFrame({"geo_state": all_geo_states})
+        merged = full_states.merge(choropleth_data, on="geo_state", how="left")
 
-        unmapped = summary[summary["geo_state"].isna() & summary["lat"].notna()].copy()
-        if not unmapped.empty:
+        # Build the custom hover text
+        hover_texts = []
+        for _, row in merged.iterrows():
+            if pd.isna(row["consumption_mw"]):
+                hover_texts.append(
+                    f"<b>{row['geo_state']}</b><br>"
+                    f"<i>No consumption data available</i>"
+                )
+            else:
+                hover_texts.append(
+                    f"<b>{row['geo_state']}</b><br>"
+                    f"Consumption: {row['consumption_formatted']} MW<br>"
+                    f"Rank: #{int(row['rank'])} of {len(choropleth_data)}<br>"
+                    f"Share: {row['pct_of_total']}% of total"
+                )
+        merged["hover_text"] = hover_texts
+
+        # --- Base layer: draw all states in grey ---
+        fig = go.Figure(
+            go.Choropleth(
+                geojson=geojson,
+                locations=merged["geo_state"],
+                z=[1] * len(merged),
+                featureidkey=f"properties.{geo_prop}",
+                colorscale=[[0, "#334155"], [1, "#334155"]],
+                showscale=False,
+                marker_line_width=0.7,
+                marker_line_color="rgba(255,255,255,0.2)",
+                text=merged["hover_text"],
+                hovertemplate="%{text}<extra></extra>",
+            )
+        )
+
+        # --- Main choropleth: data overlay, perceptually uniform scale ---
+        fig.add_trace(
+            go.Choropleth(
+                geojson=geojson,
+                locations=merged["geo_state"],
+                z=merged["consumption_mw"],
+                featureidkey=f"properties.{geo_prop}",
+                colorscale="Plasma",
+                colorbar=dict(
+                    title=dict(text="Electricity<br>Consumption<br>(MW)", font=dict(size=11)),
+                    thickness=14,
+                    len=0.6,
+                    yanchor="middle",
+                    y=0.45,
+                    tickfont=dict(size=10),
+                    tickformat=",.0f",
+                    outlinewidth=0,
+                ),
+                marker_line_width=0.7,
+                marker_line_color="rgba(255,255,255,0.6)",
+                text=merged["hover_text"],
+                hovertemplate="%{text}<extra></extra>",
+                zauto=True,
+            )
+        )
+
+        # --- UP highlight: thick gold border ---
+        up_feature = [
+            feat for feat in geojson["features"]
+            if feat.get("properties", {}).get(geo_prop) == "Uttar Pradesh"
+        ]
+        if up_feature:
+            up_geojson = {"type": "FeatureCollection", "features": up_feature}
+            up_row = merged[merged["geo_state"] == "Uttar Pradesh"]
+            up_hover = up_row["hover_text"].values[0] if not up_row.empty else "Uttar Pradesh"
             fig.add_trace(
-                go.Scattergeo(
-                    lat=unmapped["lat"],
-                    lon=unmapped["lon"],
-                    text=unmapped["region"],
-                    mode="markers",
-                    marker=dict(
-                        size=(unmapped["consumption_mw"].clip(lower=1) / unmapped["consumption_mw"].max()) * 18 + 6,
-                        color=THEME["secondary_accent"],
-                        line=dict(width=1, color="#FFFFFF"),
-                        opacity=0.85,
-                    ),
-                    hovertemplate="%{text}<br>%{marker.size:.0f} MW approximate<extra></extra>",
+                go.Choropleth(
+                    geojson=up_geojson,
+                    locations=["Uttar Pradesh"],
+                    z=[up_row["consumption_mw"].values[0] if not up_row.empty else 0],
+                    featureidkey=f"properties.{geo_prop}",
+                    colorscale=[[0, "rgba(0,0,0,0)"], [1, "rgba(0,0,0,0)"]],
+                    marker_line_width=3,
+                    marker_line_color="#FFD700",
+                    showscale=False,
+                    text=[f"<b>★ FOCUS STATE</b><br>{up_hover}"],
+                    hovertemplate="%{text}<extra></extra>",
                 )
             )
+
+        # Map projection configurations
+        fig.update_geos(
+            fitbounds="locations",
+            visible=False,
+            bgcolor="#0F172A",
+            projection_type="mercator",
+            scope="asia",
+            center=dict(lat=22.5, lon=80.0),
+            lataxis_range=[6, 38],
+            lonaxis_range=[68, 98],
+        )
+
+        # Annotation star and text for UP (using scattergeo to respect projection bounds)
+        fig.add_trace(
+            go.Scattergeo(
+                lat=[26.8],
+                lon=[80.9],
+                mode="markers+text",
+                marker=dict(size=14, color="#FFD700", symbol="star"),
+                text=["<b>Uttar Pradesh</b><br><i>Focus State</i>"],
+                textfont=dict(color="#FFD700", size=11, family="Inter, sans-serif"),
+                textposition="top right",
+                showlegend=False,
+                hoverinfo="skip"
+            )
+        )
+
     else:
-        mapped = summary.dropna(subset=["lat", "lon"]).copy()
+        # Fallback: scatter-geo if no GeoJSON available
+        mapped = summary.copy()
+        mapped["lat"] = mapped["region_normalized"].map(
+            lambda v: REGION_COORDINATES.get(v, {}).get("lat")
+        )
+        mapped["lon"] = mapped["region_normalized"].map(
+            lambda v: REGION_COORDINATES.get(v, {}).get("lon")
+        )
+        mapped = mapped.dropna(subset=["lat", "lon"])
         fig = px.scatter_geo(
             mapped,
             lat="lat",
@@ -644,8 +793,8 @@ def build_region_map(df: pd.DataFrame) -> go.Figure:
             hover_name="region",
             size="consumption_mw",
             color="consumption_mw",
-            color_continuous_scale="Blues",
-            projection="natural earth",
+            color_continuous_scale="Plasma",
+            projection="mercator",
             scope="asia",
             size_max=40,
             title="State/Region Consumption Map",
@@ -659,29 +808,31 @@ def build_region_map(df: pd.DataFrame) -> go.Figure:
             showcoastlines=False,
             lataxis_range=[6, 38],
             lonaxis_range=[68, 98],
+            center=dict(lat=22.5, lon=80.0),
         )
         fig.update_traces(
             marker=dict(opacity=0.85, line=dict(width=0.8, color="#FFFFFF")),
-            hovertemplate="%{hovertext}<br>%{marker.size:.0f} total MW<extra></extra>",
+            hovertemplate=(
+                "<b>%{hovertext}</b><br>"
+                "Consumption: %{marker.color:,.1f} MW<extra></extra>"
+            ),
         )
 
     fig.update_layout(
         template="plotly_dark",
-        margin=dict(l=8, r=8, t=44, b=8),
-        height=520,
+        title=dict(
+            text="India — State-wise Electricity Consumption",
+            font=dict(size=16, family="Inter, sans-serif"),
+            x=0.5,
+            xanchor="center",
+        ),
+        margin=dict(l=8, r=8, t=50, b=8),
+        height=540,
         paper_bgcolor="#0F172A",
         plot_bgcolor="#0F172A",
-        coloraxis_colorbar=dict(
-            title="Total MW",
-            thickness=12,
-            len=0.55,
-            yanchor="middle",
-            y=0.45,
-            tickfont=dict(size=10),
-        ),
+        font=dict(family="Inter, sans-serif"),
     )
-    return fig
-
+    return fig, non_geo
 
 def build_forecast_chart(df: pd.DataFrame, periods: int = 30) -> go.Figure:
     daily = df.groupby("date")["consumption_mw"].sum().reset_index().sort_values("date")
@@ -723,11 +874,12 @@ def build_forecast_chart(df: pd.DataFrame, periods: int = 30) -> go.Figure:
         template="plotly_dark",
         title=f"{periods}-Day Forecast for Total Consumption",
         margin=dict(l=10, r=10, t=34, b=10),
-        height=320,
+        height=300,
         paper_bgcolor="#0F172A",
         plot_bgcolor="#0F172A",
         xaxis_title="Date",
         yaxis_title="MW",
+        font=dict(family="Inter, sans-serif"),
     )
     return fig
 
@@ -798,6 +950,19 @@ def render_key_insights(df: pd.DataFrame) -> None:
     )
 
 
+def _render_non_geo_note(non_geo: pd.DataFrame) -> None:
+    """Show a small note about non-geographic entities excluded from the map."""
+    if non_geo.empty:
+        return
+    items = ", ".join(
+        f"{row['region']} ({row['consumption_mw']:,.1f} MW)"
+        for _, row in non_geo.iterrows()
+    )
+    st.caption(
+        f"ℹ️ Non-geographic entities excluded from map: {items}"
+    )
+
+
 def render_overview(df: pd.DataFrame) -> None:
     st.subheader("Consumption overview")
     render_key_insights(df)
@@ -819,7 +984,9 @@ def render_overview(df: pd.DataFrame) -> None:
     with chart2:
         st.plotly_chart(build_yearly_trend(df), width="stretch")
 
-    st.plotly_chart(build_region_map(df), width="stretch")
+    map_fig, non_geo = build_region_map(df)
+    st.plotly_chart(map_fig, width="stretch")
+    _render_non_geo_note(non_geo)
     st.caption("Top regions by cumulative consumption")
     st.dataframe(build_top_regions_table(df), width="stretch", hide_index=True)
 
@@ -835,13 +1002,13 @@ def render_drill_down(df: pd.DataFrame, filters: dict) -> None:
     chart_col, side_col = st.columns([3, 1])
     with chart_col:
         if filters["view_by"] == "Daily":
-            st.plotly_chart(build_daily_trend(df), use_container_width=True)
+            st.plotly_chart(build_daily_trend(df), width="stretch")
         elif filters["view_by"] == "Monthly":
-            st.plotly_chart(build_monthly_average_chart(df), use_container_width=True)
+            st.plotly_chart(build_monthly_average_chart(df), width="stretch")
         elif filters["view_by"] == "Seasonal":
-            st.plotly_chart(build_seasonality_heatmap(df), use_container_width=True)
+            st.plotly_chart(build_seasonality_heatmap(df), width="stretch")
         else:
-            st.plotly_chart(build_daily_trend(df), use_container_width=True)
+            st.plotly_chart(build_daily_trend(df), width="stretch")
 
     with side_col:
         st.subheader("Quick summary")
@@ -866,7 +1033,7 @@ def render_drill_down(df: pd.DataFrame, filters: dict) -> None:
                         columns={"consumption_mw": "Consumption (MW)", "z_score": "Z-Score"}
                     ),
                     hide_index=True,
-                    width="100%",
+                    width="stretch",
                 )
 
     st.markdown("---")
@@ -883,7 +1050,9 @@ def render_map_forecast(df: pd.DataFrame) -> None:
     st.subheader("Map, forecasting, and anomalies")
     st.write("Visualize the geographic distribution across states and forecast future totals for the selected range.")
 
-    st.plotly_chart(build_region_map(df), width="stretch")
+    map_fig, non_geo = build_region_map(df)
+    st.plotly_chart(map_fig, width="stretch")
+    _render_non_geo_note(non_geo)
     st.plotly_chart(build_forecast_chart(df, periods=30), width="stretch")
 
     daily = df.groupby("date")["consumption_mw"].sum().reset_index().sort_values("date")
@@ -970,13 +1139,9 @@ def render_downloads(filtered_df: pd.DataFrame, cleaned_df: pd.DataFrame, summar
 
 
 def main() -> None:
-    if "dark_mode" not in st.session_state:
-        st.session_state.dark_mode = False
-
     st.sidebar.title("India Electricity Consumption Dashboard")
     st.sidebar.caption("Interactive electricity consumption analytics for India")
     st.sidebar.markdown("---")
-    st.sidebar.checkbox("Dark mode", key="dark_mode")
 
     uploaded_file = st.sidebar.file_uploader("Upload energy CSV", type=["csv"])
 
