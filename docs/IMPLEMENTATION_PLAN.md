@@ -1,42 +1,43 @@
-# Implementation Plan
+# Implementation Roadmap (Completed)
 
-## Project goal
-Build an interactive Streamlit dashboard for analyzing daily electricity consumption trends in Uttar Pradesh using uploaded CSV data or the bundled sample dataset.
+## Project Goal
+Build an interactive Streamlit dashboard (**UrjaView: India Power Analytics**) for analyzing daily electricity consumption trends across Indian states using uploaded CSV data or the bundled sample dataset.
 
-## 1. File structure
-- app.py: main Streamlit dashboard application
-- data/UP_electricity_consumption.csv: default sample dataset for the dashboard
-- requirements.txt: Python dependencies
-- docs/IMPLEMENTATION_PLAN.md: project implementation roadmap
+## 1. File Structure
+- `app.py`: Main Streamlit dashboard application containing data cleaning, UI layout, and visualization logic.
+- `data/`: Directory for static assets.
+  - `Indias_Electricity_Consumption_.csv`: Default dataset.
+  - `india_states.geojson`: Local spatial boundaries for offline map rendering.
+- `requirements.txt`: Python dependencies (`streamlit`, `pandas`, `plotly`).
+- `docs/`: Project documentation and plans.
 
-## 2. Data processing workflow
-- Load CSV data from an uploaded file or the default sample file
-- Validate that the dataset contains the required date and consumption columns
-- Parse dates into a consistent datetime format
-- Convert consumption values to numeric values and remove invalid rows
-- Generate a data quality report covering row counts, duplicates, missing values, and cleaning steps
+## 2. Data Processing Workflow
+- Load dataset and identify spatial ("Region") and temporal ("Date") columns dynamically.
+- Transform wide-format regional data into long-format for analytical mapping.
+- Clean and normalize state names using a robust dictionary mapping to resolve historical naming mismatches (e.g., Orissa vs Odisha, Uttaranchal vs Uttarakhand).
+- Calculate Z-scores for anomaly detection and 30-day linear regression for forecasting.
 
-## 3. Dashboard experience
-- Sidebar controls for date range, year, and month filtering
-- Navigation for Overview, Insights, and Data Quality sections
-- KPI cards for average, peak, minimum, and latest consumption
-- Interactive visualizations for daily trends, monthly averages, yearly totals, and seasonal patterns
-- Summary table for the highest-consumption days
-- Download options for filtered, cleaned, and summarized data
+## 3. Dashboard Experience
+- **Sidebar Controls**: Upload custom CSVs, filter by quick date ranges or custom dates, and navigate application pages.
+- **Pages**:
+  - **Overview**: High-level KPIs, multi-tier temporal trend lines (daily, monthly, yearly), and an interactive geographical map.
+  - **Map & Forecast**: Deep dive into spatial mapping and 30-day trend forecasting.
+  - **Drill-down**: Isolate data by seasonality, specific months, or daily views. Contains anomaly tables and top regions.
+  - **Insights & Data Quality**: Automated statistical summaries and data health reports.
+- **Styling**: Sleek dark theme powered by custom CSS and Google's Inter font.
 
-## 4. Visualizations planned
-- Daily consumption trend with a 30-day rolling average
-- Monthly average consumption bar chart
-- Yearly consumption trend line chart
-- Seasonality heatmap by month and year
-- Key insights and highlight cards for unusual or notable consumption periods
+## 4. Visualizations & Geospatial Features
+- **Choropleth Map**: Full 36-state/UT rendering using a perceptually uniform `Plasma` color scale. Missing data regions gracefully fall back to a dark slate-grey base layer.
+- **Focus Highlighting**: Uttar Pradesh highlighted with a gold boundary and pinned star annotation.
+- **Heatmap**: Month vs. Year seasonality intensity map handling missing periods gracefully (no false zeroes).
+- **Trend Lines**: Daily consumption line charts, monthly averages, and yearly totals.
 
-## 5. Assumptions
-- The input file contains at least one date column and one consumption column
-- The dashboard focuses on clarity, usability, and quick analytical insight
-- The app is intended for electricity consumption analysis rather than sales or retail reporting
+## 5. Technical Decisions & Assumptions
+- **GeoJSON**: Bundled locally to ensure zero runtime network dependencies.
+- **Plotly over PyDeck**: Selected for native Streamlit interactivity, rich tooltips, and seamless UI integration.
+- **Streamlit Version**: Uses `width="stretch"` standard for compatibility with Streamlit 1.59+.
 
-## 6. Future enhancements
-- Add forecasting and anomaly detection for consumption spikes
-- Support multiple states or regions in a single dashboard
-- Add richer drill-down views by month, season, or custom date ranges
+## 6. Future Enhancements
+- Integrate real-time API fetching for live grid data.
+- Add multi-variate analysis (e.g., consumption vs. generation/weather data).
+- Export complete PDF reports of the dashboard state.
