@@ -169,7 +169,7 @@ def get_geojson_state_property(geojson: dict) -> str | None:
             return key
     return next((key for key in properties if "name" in key.lower()), None)
 
-st.set_page_config(page_title="India Electricity Consumption Dashboard", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="UrjaView: India Power Analytics", page_icon="⚡", layout="wide")
 
 st.markdown(
     f"""
@@ -1139,7 +1139,7 @@ def render_downloads(filtered_df: pd.DataFrame, cleaned_df: pd.DataFrame, summar
 
 
 def main() -> None:
-    st.sidebar.title("India Electricity Consumption Dashboard")
+    st.sidebar.title("UrjaView: India Power Analytics")
     st.sidebar.caption("Interactive electricity consumption analytics for India")
     st.sidebar.markdown("---")
 
