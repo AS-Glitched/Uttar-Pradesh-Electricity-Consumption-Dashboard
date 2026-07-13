@@ -1,6 +1,9 @@
-﻿import re
+﻿import json
+import re
+import urllib.request
 from datetime import timedelta
 from pathlib import Path
+from urllib.error import URLError
 
 import numpy as np
 import pandas as pd
@@ -8,8 +11,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-# Use the workspace `data/UP_electricity_consumption.csv` by default if present
-DEFAULT_DATA_PATH = Path(__file__).resolve().parent / "data" / "UP_electricity_consumption.csv"
+DEFAULT_DATA_PATH = Path(__file__).resolve().parent / "data" / "Indias_Electricity_Consumption_.csv"
+FALLBACK_DATA_PATH = Path(__file__).resolve().parent / "data" / "UP_electricity_consumption.csv"
 
 THEME = {
     "bg": "#0F172A",
@@ -35,8 +38,122 @@ MONTH_ORDER = [
     "November",
     "December",
 ]
+SEASON_ORDER = ["Winter", "Spring", "Summer", "Autumn"]
 
-st.set_page_config(page_title="Uttar Pradesh Electricity Consumption Dashboard", page_icon="⚡", layout="wide")
+REGION_COORDINATES = {
+    "andhrapradesh": {"lat": 15.9129, "lon": 79.7400},
+    "arunachalpradesh": {"lat": 28.2180, "lon": 94.7278},
+    "assam": {"lat": 26.2006, "lon": 92.9376},
+    "bihar": {"lat": 25.0961, "lon": 85.3131},
+    "chandigarh": {"lat": 30.7333, "lon": 76.7794},
+    "chhattisgarh": {"lat": 21.2951, "lon": 81.8282},
+    "dd": {"lat": 20.4283, "lon": 72.8397},
+    "delhi": {"lat": 28.7041, "lon": 77.1025},
+    "dnh": {"lat": 20.1809, "lon": 73.0169},
+    "dvc": {"lat": 23.6461, "lon": 86.1990},
+    "essarsteel": {"lat": 21.2403, "lon": 81.6286},
+    "goa": {"lat": 15.2993, "lon": 74.1240},
+    "gujarat": {"lat": 22.2587, "lon": 71.1924},
+    "haryana": {"lat": 29.0588, "lon": 76.0856},
+    "hp": {"lat": 31.1048, "lon": 77.1734},
+    "jk": {"lat": 33.7782, "lon": 76.5762},
+    "jharkhand": {"lat": 23.6102, "lon": 85.2799},
+    "karnataka": {"lat": 15.3173, "lon": 75.7139},
+    "kerala": {"lat": 10.8505, "lon": 76.2711},
+    "maharashtra": {"lat": 19.7515, "lon": 75.7139},
+    "manipur": {"lat": 24.6637, "lon": 93.9063},
+    "meghalaya": {"lat": 25.4670, "lon": 91.3662},
+    "mizoram": {"lat": 23.1645, "lon": 92.9376},
+    "mp": {"lat": 22.9734, "lon": 78.6569},
+    "nagaland": {"lat": 26.1584, "lon": 94.5624},
+    "odisha": {"lat": 20.9517, "lon": 85.0985},
+    "pondy": {"lat": 11.9416, "lon": 79.8083},
+    "punjab": {"lat": 31.1471, "lon": 75.3412},
+    "rajasthan": {"lat": 27.0238, "lon": 74.2179},
+    "sikkim": {"lat": 27.5330, "lon": 88.5122},
+    "tamillnadu": {"lat": 11.1271, "lon": 78.6569},
+    "telangana": {"lat": 18.1124, "lon": 79.0193},
+    "tripura": {"lat": 23.9408, "lon": 91.9882},
+    "up": {"lat": 26.8467, "lon": 80.9462},
+    "uttarakhand": {"lat": 30.0668, "lon": 79.0193},
+    "westbengal": {"lat": 22.9868, "lon": 87.8550},
+}
+
+INDIA_GEOJSON_SOURCES = [
+    "https://raw.githubusercontent.com/geohacker/india/master/state/india_state.geojson",
+    "https://raw.githubusercontent.com/datameet/maps/master/States_INDIA.geojson",
+]
+GEOJSON_STATE_KEY_CANDIDATES = [
+    "st_nm",
+    "STATE_NAME",
+    "NAME_1",
+    "NAME",
+    "state_name",
+    "STATE",
+    "ST_NM",
+]
+INDIA_STATE_GEO_NAMES = {
+    "andhrapradesh": "Andhra Pradesh",
+    "arunachalpradesh": "Arunachal Pradesh",
+    "assam": "Assam",
+    "bihar": "Bihar",
+    "chandigarh": "Chandigarh",
+    "chhattisgarh": "Chhattisgarh",
+    "delhi": "Delhi",
+    "goa": "Goa",
+    "gujarat": "Gujarat",
+    "haryana": "Haryana",
+    "hp": "Himachal Pradesh",
+    "jk": "Jammu and Kashmir",
+    "jharkhand": "Jharkhand",
+    "karnataka": "Karnataka",
+    "kerala": "Kerala",
+    "maharashtra": "Maharashtra",
+    "manipur": "Manipur",
+    "meghalaya": "Meghalaya",
+    "mizoram": "Mizoram",
+    "mp": "Madhya Pradesh",
+    "nagaland": "Nagaland",
+    "odisha": "Odisha",
+    "pondy": "Puducherry",
+    "punjab": "Punjab",
+    "rajasthan": "Rajasthan",
+    "sikkim": "Sikkim",
+    "tamillnadu": "Tamil Nadu",
+    "telangana": "Telangana",
+    "tripura": "Tripura",
+    "up": "Uttar Pradesh",
+    "uttarakhand": "Uttarakhand",
+    "westbengal": "West Bengal",
+    "dd": "Daman and Diu",
+    "dnh": "Dadra and Nagar Haveli",
+}
+
+
+@st.cache_data(show_spinner=False)
+def load_india_geojson() -> dict | None:
+    for url in INDIA_GEOJSON_SOURCES:
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:
+                geojson = json.loads(response.read().decode("utf-8"))
+                if geojson.get("features"):
+                    return geojson
+        except (URLError, ValueError, OSError):
+            continue
+    return None
+
+
+def get_geojson_state_property(geojson: dict) -> str | None:
+    first_feature = next(iter(geojson.get("features", [])), None)
+    if not first_feature:
+        return None
+    properties = first_feature.get("properties", {})
+    for key in GEOJSON_STATE_KEY_CANDIDATES:
+        if key in properties:
+            return key
+    return next((key for key in properties if "name" in key.lower()), None)
+
+st.set_page_config(page_title="India Electricity Consumption Dashboard", page_icon="⚡", layout="wide")
 
 st.markdown(
     f"""
@@ -144,60 +261,113 @@ def metric_card(title: str, value: str, delta: str | None = None) -> None:
     )
 
 
+def get_season(month_value: int) -> str:
+    if month_value in {12, 1, 2}:
+        return "Winter"
+    if month_value in {3, 4, 5}:
+        return "Spring"
+    if month_value in {6, 7, 8}:
+        return "Summer"
+    return "Autumn"
+
+
 def load_data(uploaded_file=None) -> tuple[pd.DataFrame, dict]:
     if uploaded_file is not None:
-        data = pd.read_csv(uploaded_file)
+        raw = pd.read_csv(uploaded_file)
     elif DEFAULT_DATA_PATH.exists():
-        data = pd.read_csv(DEFAULT_DATA_PATH)
+        raw = pd.read_csv(DEFAULT_DATA_PATH)
+    elif FALLBACK_DATA_PATH.exists():
+        raw = pd.read_csv(FALLBACK_DATA_PATH)
     else:
         raise ValueError("No energy dataset was found. Please upload a CSV file with energy data.")
 
     quality_report = {
         "source": "uploaded" if uploaded_file is not None else "sample",
-        "row_count_before": len(data),
-        "duplicate_count_before": int(data.duplicated().sum()),
-        "missing_values_before": data.isna().sum().to_dict(),
-        "dtypes_before": {col: str(dtype) for col, dtype in data.dtypes.items()},
+        "row_count_before": len(raw),
+        "duplicate_count_before": int(raw.duplicated().sum()),
+        "missing_values_before": raw.isna().sum().to_dict(),
+        "dtypes_before": {col: str(dtype) for col, dtype in raw.dtypes.items()},
         "invalid_numeric_rows": {},
         "cleaning_steps": [],
     }
 
-    date_column = next((col for col in data.columns if normalize_column_name(col) == "dates"), None)
-    up_column = next((col for col in data.columns if normalize_column_name(col) == "up"), None)
+    date_column = next((col for col in raw.columns if normalize_column_name(col) == "dates"), None)
+    if not date_column:
+        raise ValueError("The file must contain a Dates column.")
 
-    if not date_column or not up_column:
-        raise ValueError("The file must contain a Dates column and a UP column.")
+    total_column = next(
+        (col for col in raw.columns if normalize_column_name(col) in {"totalconsumption", "total"}),
+        None,
+    )
+    region_columns = [
+        col
+        for col in raw.columns
+        if col != date_column and normalize_column_name(col) not in {"totalconsumption", "total"}
+    ]
+    if not region_columns:
+        raise ValueError("The file must contain region/state consumption columns besides Dates.")
 
-    data = data[[date_column, up_column]].copy()
-    data.columns = ["date", "consumption_mw"]
+    raw = raw[[date_column] + region_columns + ([total_column] if total_column else [])].copy()
+    raw[date_column] = pd.to_datetime(raw[date_column], errors="coerce")
 
-    data["date"] = pd.to_datetime(data["date"], errors="coerce")
-    original = data["consumption_mw"].copy()
-    data["consumption_mw"] = pd.to_numeric(data["consumption_mw"], errors="coerce")
-    quality_report["invalid_numeric_rows"]["consumption_mw"] = int(original.notna().sum() - data["consumption_mw"].notna().sum())
-    data = data.dropna().reset_index(drop=True)
+    for col in region_columns:
+        raw[col] = pd.to_numeric(raw[col], errors="coerce")
 
-    if data.empty:
-        raise ValueError("No valid Uttar Pradesh consumption rows were found.")
+    if total_column is not None:
+        raw[total_column] = pd.to_numeric(raw[total_column], errors="coerce")
+    else:
+        raw["Total Consumption"] = raw[region_columns].sum(axis=1, min_count=1)
+        total_column = "Total Consumption"
 
-    data["year"] = data["date"].dt.year
-    data["month"] = data["date"].dt.month
-    data["month_name"] = data["date"].dt.month_name()
+    quality_report["invalid_numeric_rows"] = raw[region_columns + [total_column]].isna().sum().to_dict()
+    raw = raw.dropna(subset=[date_column]).reset_index(drop=True)
 
-    quality_report["row_count_after"] = len(data)
-    quality_report["duplicate_count_after"] = int(data.duplicated().sum())
-    quality_report["missing_values_after"] = data.isna().sum().to_dict()
+    melted = raw.melt(
+        id_vars=[date_column],
+        value_vars=region_columns,
+        var_name="region",
+        value_name="consumption_mw",
+    )
+    melted = melted.dropna(subset=["consumption_mw"]).reset_index(drop=True)
+    melted["year"] = melted[date_column].dt.year
+    melted["month"] = melted[date_column].dt.month
+    melted["month_name"] = melted[date_column].dt.month_name()
+    melted["season"] = melted[date_column].dt.month.apply(get_season)
+    melted["day_name"] = melted[date_column].dt.day_name()
+    melted["region_normalized"] = melted["region"].apply(normalize_column_name)
+    melted.rename(columns={date_column: "date"}, inplace=True)
+
+    invalid_negative = melted[melted["consumption_mw"] < 0]
+    invalid_negative_count = len(invalid_negative)
+    invalid_negative_dates = sorted(invalid_negative["date"].dt.strftime("%Y-%m-%d").unique().tolist())
+    if invalid_negative_count > 0:
+        melted = melted[melted["consumption_mw"] >= 0].reset_index(drop=True)
+        quality_report["invalid_negative_count"] = invalid_negative_count
+        quality_report["invalid_negative_dates"] = invalid_negative_dates
+    else:
+        quality_report["invalid_negative_count"] = 0
+        quality_report["invalid_negative_dates"] = []
+
+    quality_report["row_count_after"] = len(melted)
+    quality_report["duplicate_count_after"] = int(melted.duplicated().sum())
+    quality_report["missing_values_after"] = melted.isna().sum().to_dict()
     quality_report["date_range"] = {
-        "start": data["date"].min().strftime("%Y-%m-%d"),
-        "end": data["date"].max().strftime("%Y-%m-%d"),
+        "start": melted["date"].min().strftime("%Y-%m-%d"),
+        "end": melted["date"].max().strftime("%Y-%m-%d"),
     }
     quality_report["cleaning_steps"] = [
-        "Loaded the Dates and UP columns only",
-        "Parsed the date column into datetime format",
-        "Converted consumption values to numeric format",
-        "Dropped missing values and added year/month fields",
+        "Loaded the Dates and region/state columns",
+        "Converted the date column into datetime format",
+        "Converted state consumption values to numeric format",
+        "Created a long-form dataset for region-level analysis",
+        "Added year, month, season, and normalized region fields",
     ]
-    return data, quality_report
+    if invalid_negative_count > 0:
+        quality_report["cleaning_steps"].append(
+            f"Removed {invalid_negative_count} negative consumption readings from {len(invalid_negative_dates)} dates"
+        )
+
+    return melted, quality_report
 
 
 def build_filters(df: pd.DataFrame) -> dict:
@@ -220,24 +390,29 @@ def build_filters(df: pd.DataFrame) -> dict:
     elif preset == "Last 365 days":
         start_date = max_date - timedelta(days=364)
         end_date = max_date
-    elif preset == "Custom":
+    else:
         start_date = st.sidebar.date_input("Start date", min_date, min_value=min_date, max_value=max_date)
         end_date = st.sidebar.date_input("End date", max_date, min_value=min_date, max_value=max_date)
-    else:
-        start_date = min_date
-        end_date = max_date
+
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
 
     available_years = sorted(df["year"].unique().tolist())
     available_months = [m for m in MONTH_ORDER if m in df["month_name"].unique()]
+    available_regions = sorted(df["region"].unique().tolist())
 
     selected_years = st.sidebar.multiselect("Year", available_years, default=available_years)
     selected_months = st.sidebar.multiselect("Month", available_months, default=available_months)
+    selected_regions = st.sidebar.multiselect("Region / State", available_regions, default=available_regions)
+    view_by = st.sidebar.radio("Drill-down level", ["Daily", "Monthly", "Seasonal", "Custom"], index=0)
 
     return {
         "start_date": pd.Timestamp(start_date),
         "end_date": pd.Timestamp(end_date),
         "years": selected_years,
         "months": selected_months,
+        "regions": selected_regions,
+        "view_by": view_by,
     }
 
 
@@ -248,14 +423,17 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         filtered = filtered[filtered["year"].isin(filters["years"])]
     if filters["months"]:
         filtered = filtered[filtered["month_name"].isin(filters["months"])]
+    if filters["regions"]:
+        filtered = filtered[filtered["region"].isin(filters["regions"])]
     return filtered
 
 
 def calculate_kpis(df: pd.DataFrame) -> dict:
-    avg_consumption = float(df["consumption_mw"].mean())
-    peak_consumption = float(df["consumption_mw"].max())
-    min_consumption = float(df["consumption_mw"].min())
-    latest_consumption = float(df.sort_values("date").iloc[-1]["consumption_mw"])
+    daily_totals = df.groupby("date")["consumption_mw"].sum()
+    avg_consumption = float(daily_totals.mean())
+    peak_consumption = float(daily_totals.max())
+    min_consumption = float(daily_totals.min())
+    latest_consumption = float(daily_totals.sort_index().iloc[-1])
     return {
         "avg_consumption": avg_consumption,
         "peak_consumption": peak_consumption,
@@ -264,36 +442,58 @@ def calculate_kpis(df: pd.DataFrame) -> dict:
     }
 
 
+def detect_anomalies(df: pd.DataFrame, window: int = 14, threshold: float = 2.5) -> pd.DataFrame:
+    series = df.set_index("date")["consumption_mw"].sort_index()
+    rolling_mean = series.rolling(window=window, min_periods=3).mean()
+    rolling_std = series.rolling(window=window, min_periods=3).std()
+    z_scores = (series - rolling_mean) / rolling_std
+    anomalies = series[(z_scores.abs() > threshold)].reset_index()
+    if not anomalies.empty:
+        anomalies["z_score"] = z_scores.loc[anomalies["date"].values].values
+    return anomalies
+
+
 def build_daily_trend(df: pd.DataFrame) -> go.Figure:
-    df_sorted = df.sort_values("date").copy()
-    df_sorted["rolling_avg_30d"] = df_sorted["consumption_mw"].rolling(window=30, min_periods=30).mean()
+    daily = df.groupby("date")["consumption_mw"].sum().reset_index().sort_values("date")
+    daily["rolling_avg_30d"] = daily["consumption_mw"].rolling(window=30, min_periods=5).mean()
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=df_sorted["date"],
-            y=df_sorted["consumption_mw"],
+            x=daily["date"],
+            y=daily["consumption_mw"],
             mode="lines+markers",
             name="Daily Consumption",
             line=dict(color=THEME["primary_accent"], width=1.4),
-            opacity=0.45,
-            marker=dict(size=3, color=THEME["primary_accent"]),
+            marker=dict(size=4, color=THEME["primary_accent"]),
             hovertemplate="%{x|%b %d, %Y}<br>%{y:,.2f} MW<extra></extra>",
         )
     )
     fig.add_trace(
         go.Scatter(
-            x=df_sorted["date"],
-            y=df_sorted["rolling_avg_30d"],
+            x=daily["date"],
+            y=daily["rolling_avg_30d"],
             mode="lines",
             name="30-Day Rolling Avg",
             line=dict(color=THEME["secondary_accent"], width=2.6),
             hovertemplate="%{x|%b %d, %Y}<br>%{y:,.2f} MW<extra></extra>",
         )
     )
+    anomalies = detect_anomalies(daily)
+    if not anomalies.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=anomalies["date"],
+                y=anomalies["consumption_mw"],
+                mode="markers",
+                name="Anomaly",
+                marker=dict(size=10, color="#F43F5E", symbol="x"),
+                hovertemplate="%{x|%b %d, %Y}<br>%{y:,.2f} MW<br>Anomaly detected<extra></extra>",
+            )
+        )
     fig.update_layout(
         template="plotly_dark",
         title="Daily Consumption Trend",
-        margin=dict(l=10, r=10, t=40, b=10),
+        margin=dict(l=10, r=10, t=36, b=10),
         height=300,
         paper_bgcolor="#0F172A",
         plot_bgcolor="#0F172A",
@@ -321,8 +521,8 @@ def build_monthly_average_chart(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         template="plotly_dark",
         title="Monthly Average Consumption",
-        margin=dict(l=10, r=10, t=40, b=10),
-        height=300,
+        margin=dict(l=10, r=10, t=34, b=10),
+        height=280,
         paper_bgcolor="#0F172A",
         plot_bgcolor="#0F172A",
         xaxis_title="Month",
@@ -344,8 +544,8 @@ def build_yearly_trend(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         template="plotly_dark",
         title="Yearly Consumption Trend",
-        margin=dict(l=10, r=10, t=40, b=10),
-        height=300,
+        margin=dict(l=10, r=10, t=34, b=10),
+        height=280,
         paper_bgcolor="#0F172A",
         plot_bgcolor="#0F172A",
         xaxis_title="Year",
@@ -374,8 +574,8 @@ def build_seasonality_heatmap(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         template="plotly_dark",
         title="Seasonality: Month vs Year",
-        margin=dict(l=10, r=10, t=40, b=10),
-        height=320,
+        margin=dict(l=10, r=10, t=34, b=10),
+        height=300,
         paper_bgcolor="#0F172A",
         plot_bgcolor="#0F172A",
         xaxis_title="Month",
@@ -384,12 +584,161 @@ def build_seasonality_heatmap(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def build_region_map(df: pd.DataFrame) -> go.Figure:
+    summary = (
+        df.groupby(["region", "region_normalized"])["consumption_mw"]
+        .sum()
+        .reset_index()
+        .sort_values("consumption_mw", ascending=False)
+    )
+    summary["lat"] = summary["region_normalized"].map(lambda value: REGION_COORDINATES.get(value, {}).get("lat"))
+    summary["lon"] = summary["region_normalized"].map(lambda value: REGION_COORDINATES.get(value, {}).get("lon"))
+    summary["geo_state"] = summary["region_normalized"].map(INDIA_STATE_GEO_NAMES)
+    choropleth_data = summary.dropna(subset=["geo_state"]).copy()
+    geojson = load_india_geojson()
+    geo_prop = get_geojson_state_property(geojson) if geojson else None
+
+    if geojson and geo_prop and not choropleth_data.empty:
+        fig = px.choropleth(
+            choropleth_data,
+            geojson=geojson,
+            locations="geo_state",
+            featureidkey=f"properties.{geo_prop}",
+            color="consumption_mw",
+            color_continuous_scale="Blues",
+            projection="natural earth",
+            scope="asia",
+            title="State/Region Consumption Map",
+            labels={"consumption_mw": "Total MW"},
+        )
+        fig.update_traces(
+            marker_line_width=0.9,
+            marker_line_color="#FFFFFF",
+            selector=dict(type="choropleth"),
+        )
+        fig.update_geos(fitbounds="locations", visible=False)
+
+        unmapped = summary[summary["geo_state"].isna() & summary["lat"].notna()].copy()
+        if not unmapped.empty:
+            fig.add_trace(
+                go.Scattergeo(
+                    lat=unmapped["lat"],
+                    lon=unmapped["lon"],
+                    text=unmapped["region"],
+                    mode="markers",
+                    marker=dict(
+                        size=(unmapped["consumption_mw"].clip(lower=1) / unmapped["consumption_mw"].max()) * 18 + 6,
+                        color=THEME["secondary_accent"],
+                        line=dict(width=1, color="#FFFFFF"),
+                        opacity=0.85,
+                    ),
+                    hovertemplate="%{text}<br>%{marker.size:.0f} MW approximate<extra></extra>",
+                )
+            )
+    else:
+        mapped = summary.dropna(subset=["lat", "lon"]).copy()
+        fig = px.scatter_geo(
+            mapped,
+            lat="lat",
+            lon="lon",
+            hover_name="region",
+            size="consumption_mw",
+            color="consumption_mw",
+            color_continuous_scale="Blues",
+            projection="natural earth",
+            scope="asia",
+            size_max=40,
+            title="State/Region Consumption Map",
+        )
+        fig.update_geos(
+            landcolor="#0F172A",
+            oceancolor="#020617",
+            lakecolor="#020617",
+            showland=True,
+            showcountries=True,
+            showcoastlines=False,
+            lataxis_range=[6, 38],
+            lonaxis_range=[68, 98],
+        )
+        fig.update_traces(
+            marker=dict(opacity=0.85, line=dict(width=0.8, color="#FFFFFF")),
+            hovertemplate="%{hovertext}<br>%{marker.size:.0f} total MW<extra></extra>",
+        )
+
+    fig.update_layout(
+        template="plotly_dark",
+        margin=dict(l=8, r=8, t=44, b=8),
+        height=520,
+        paper_bgcolor="#0F172A",
+        plot_bgcolor="#0F172A",
+        coloraxis_colorbar=dict(
+            title="Total MW",
+            thickness=12,
+            len=0.55,
+            yanchor="middle",
+            y=0.45,
+            tickfont=dict(size=10),
+        ),
+    )
+    return fig
+
+
+def build_forecast_chart(df: pd.DataFrame, periods: int = 30) -> go.Figure:
+    daily = df.groupby("date")["consumption_mw"].sum().reset_index().sort_values("date")
+    if len(daily) < 6:
+        return build_daily_trend(df)
+
+    x = np.arange(len(daily))
+    y = daily["consumption_mw"].to_numpy()
+    coeffs = np.polyfit(x, y, 1)
+    trend = np.poly1d(coeffs)
+    forecast_index = np.arange(len(daily), len(daily) + periods)
+    forecast_values = trend(forecast_index)
+
+    forecast_dates = pd.date_range(start=daily["date"].iloc[-1] + pd.Timedelta(days=1), periods=periods)
+    forecast = pd.DataFrame({"date": forecast_dates, "consumption_mw": forecast_values})
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=daily["date"],
+            y=daily["consumption_mw"],
+            mode="lines",
+            name="Actual",
+            line=dict(color=THEME["primary_accent"], width=2.2),
+            hovertemplate="%{x|%b %d, %Y}<br>%{y:,.2f} MW<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=forecast["date"],
+            y=forecast["consumption_mw"],
+            mode="lines",
+            name="Forecast",
+            line=dict(color="#60A5FA", width=2.2, dash="dash"),
+            hovertemplate="%{x|%b %d, %Y}<br>%{y:,.2f} MW<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        title=f"{periods}-Day Forecast for Total Consumption",
+        margin=dict(l=10, r=10, t=34, b=10),
+        height=320,
+        paper_bgcolor="#0F172A",
+        plot_bgcolor="#0F172A",
+        xaxis_title="Date",
+        yaxis_title="MW",
+    )
+    return fig
+
+
 def build_top_days_table(df: pd.DataFrame) -> pd.DataFrame:
     top_days = (
-        df[["date", "consumption_mw"]]
+        df.groupby("date")["consumption_mw"]
+        .sum()
+        .reset_index()
         .sort_values("consumption_mw", ascending=False)
         .head(10)
-        .copy()
     )
     top_days["date"] = top_days["date"].dt.strftime("%Y-%m-%d")
     top_days["consumption_mw"] = top_days["consumption_mw"].round(2)
@@ -397,20 +746,36 @@ def build_top_days_table(df: pd.DataFrame) -> pd.DataFrame:
     return top_days
 
 
+def build_top_regions_table(df: pd.DataFrame) -> pd.DataFrame:
+    top_regions = (
+        df.groupby("region")["consumption_mw"]
+        .sum()
+        .reset_index()
+        .sort_values("consumption_mw", ascending=False)
+        .head(12)
+    )
+    top_regions["consumption_mw"] = top_regions["consumption_mw"].round(2)
+    top_regions.columns = ["Region", "Total Consumption (MW)"]
+    return top_regions
+
+
 def generate_insights(df: pd.DataFrame) -> list[str]:
     if df.empty:
         return []
 
-    peak_record = df.loc[df["consumption_mw"].idxmax()]
-    min_record = df.loc[df["consumption_mw"].idxmin()]
+    daily_totals = df.groupby("date")["consumption_mw"].sum()
+    peak_record = daily_totals.idxmax()
+    min_record = daily_totals.idxmin()
+    highest_region = df.groupby("region")["consumption_mw"].sum().idxmax()
     monthly_avg = df.groupby("month_name")["consumption_mw"].mean().sort_values(ascending=False)
     highest_month = monthly_avg.index[0]
     lowest_month = monthly_avg.index[-1]
 
     insights = [
-        f"Peak consumption occurred on {peak_record['date'].strftime('%b %d, %Y')} at {format_mw(float(peak_record['consumption_mw']))}.",
-        f"The lowest observed consumption was on {min_record['date'].strftime('%b %d, %Y')} at {format_mw(float(min_record['consumption_mw']))}.",
-        f"{highest_month} shows the highest average monthly consumption, while {lowest_month} is the lowest.",
+        f"Peak total consumption occurred on {peak_record.strftime('%b %d, %Y')}.",
+        f"Lowest total consumption was observed on {min_record.strftime('%b %d, %Y')}.",
+        f"{highest_region} has the highest cumulative consumption in the selected set.",
+        f"{highest_month} is the most intensive month while {lowest_month} is the least intensive month on average.",
     ]
     return insights
 
@@ -439,25 +804,99 @@ def render_overview(df: pd.DataFrame) -> None:
     kpis = calculate_kpis(df)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        metric_card("Average Consumption", format_mw(kpis["avg_consumption"]))
+        metric_card("Average Daily Consumption", format_mw(kpis["avg_consumption"]))
     with col2:
-        metric_card("Peak Consumption", format_mw(kpis["peak_consumption"]), "Highest daily value")
+        metric_card("Peak Daily Consumption", format_mw(kpis["peak_consumption"]), "Highest total day")
     with col3:
-        metric_card("Minimum Consumption", format_mw(kpis["min_consumption"]), "Lowest daily value")
+        metric_card("Minimum Daily Consumption", format_mw(kpis["min_consumption"]), "Lowest total day")
     with col4:
-        metric_card("Latest Consumption", format_mw(kpis["latest_consumption"]), "Most recent observation")
+        metric_card("Latest Daily Consumption", format_mw(kpis["latest_consumption"]), "Most recent day")
 
+    st.plotly_chart(build_daily_trend(df), width="stretch")
     chart1, chart2 = st.columns(2)
     with chart1:
-        st.plotly_chart(build_daily_trend(df), width="stretch")
-    with chart2:
         st.plotly_chart(build_monthly_average_chart(df), width="stretch")
+    with chart2:
+        st.plotly_chart(build_yearly_trend(df), width="stretch")
 
-    st.plotly_chart(build_yearly_trend(df), width="stretch")
-    st.plotly_chart(build_seasonality_heatmap(df), width="stretch")
+    st.plotly_chart(build_region_map(df), width="stretch")
+    st.caption("Top regions by cumulative consumption")
+    st.dataframe(build_top_regions_table(df), width="stretch", hide_index=True)
 
-    st.caption("Top 10 highest-consumption days")
-    st.dataframe(build_top_days_table(df), width="stretch", hide_index=True)
+
+def render_drill_down(df: pd.DataFrame, filters: dict) -> None:
+    st.subheader("Drill-down explorer")
+    st.write("Refine the view by month, season, or a custom date range using the sidebar filters.")
+
+    if df.empty:
+        st.info("No data is available for the selected filters.")
+        return
+
+    chart_col, side_col = st.columns([3, 1])
+    with chart_col:
+        if filters["view_by"] == "Daily":
+            st.plotly_chart(build_daily_trend(df), use_container_width=True)
+        elif filters["view_by"] == "Monthly":
+            st.plotly_chart(build_monthly_average_chart(df), use_container_width=True)
+        elif filters["view_by"] == "Seasonal":
+            st.plotly_chart(build_seasonality_heatmap(df), use_container_width=True)
+        else:
+            st.plotly_chart(build_daily_trend(df), use_container_width=True)
+
+    with side_col:
+        st.subheader("Quick summary")
+        kpis = calculate_kpis(df)
+        metric_card("Average", format_mw(kpis["avg_consumption"]))
+        metric_card("Peak", format_mw(kpis["peak_consumption"]))
+        metric_card("Latest", format_mw(kpis["latest_consumption"]))
+
+        with st.expander("Anomaly detection"):
+            daily = df.groupby("date")["consumption_mw"].sum().reset_index().sort_values("date")
+            anomalies = detect_anomalies(daily)
+            if anomalies.empty:
+                st.info("No significant consumption spikes detected in this range.")
+            else:
+                st.write("Anomalous consumption dates:")
+                anomalies_display = anomalies.copy()
+                anomalies_display["date"] = anomalies_display["date"].dt.strftime("%Y-%m-%d")
+                anomalies_display["consumption_mw"] = anomalies_display["consumption_mw"].round(2)
+                anomalies_display["z_score"] = anomalies_display["z_score"].round(2)
+                st.dataframe(
+                    anomalies_display.rename(
+                        columns={"consumption_mw": "Consumption (MW)", "z_score": "Z-Score"}
+                    ),
+                    hide_index=True,
+                    width="100%",
+                )
+
+    st.markdown("---")
+    bottom_col1, bottom_col2 = st.columns(2)
+    with bottom_col1:
+        st.caption("Top regions by consumption")
+        st.dataframe(build_top_regions_table(df), width="stretch", hide_index=True)
+    with bottom_col2:
+        st.caption("Top consumption days")
+        st.dataframe(build_top_days_table(df), width="stretch", hide_index=True)
+
+
+def render_map_forecast(df: pd.DataFrame) -> None:
+    st.subheader("Map, forecasting, and anomalies")
+    st.write("Visualize the geographic distribution across states and forecast future totals for the selected range.")
+
+    st.plotly_chart(build_region_map(df), width="stretch")
+    st.plotly_chart(build_forecast_chart(df, periods=30), width="stretch")
+
+    daily = df.groupby("date")["consumption_mw"].sum().reset_index().sort_values("date")
+    anomalies = detect_anomalies(daily)
+    if anomalies.empty:
+        st.success("No major spike anomalies were detected for the selected period.")
+    else:
+        st.warning(f"Detected {len(anomalies)} anomalous consumption spikes in the selected range.")
+        st.dataframe(
+            anomalies.assign(date=anomalies["date"].dt.strftime("%Y-%m-%d"), consumption_mw=anomalies["consumption_mw"].round(2), z_score=anomalies["z_score"].round(2))
+            .rename(columns={"consumption_mw": "Consumption (MW)", "z_score": "Z-Score"}),
+            hide_index=True,
+        )
 
 
 def render_insights(df: pd.DataFrame) -> None:
@@ -473,7 +912,7 @@ def render_insights(df: pd.DataFrame) -> None:
     st.download_button(
         label="Download insight summary",
         data="\n".join(insights),
-        file_name="up_electricity_insights.txt",
+        file_name="india_electricity_insights.txt",
         mime="text/plain",
     )
 
@@ -488,11 +927,20 @@ def render_data_quality(df: pd.DataFrame, quality_report: dict) -> None:
     with col3:
         metric_card("Date range", f"{quality_report['date_range']['start']} → {quality_report['date_range']['end']}")
     with col4:
-        metric_card("Numeric issues", f"{sum(quality_report['invalid_numeric_rows'].values()):,}")
+        metric_card(
+            "Invalid negative values",
+            f"{quality_report.get('invalid_negative_count', 0):,}",
+        )
 
     st.write("### Cleaning steps")
     for step in quality_report["cleaning_steps"]:
         st.write(f"- {step}")
+
+    if quality_report.get("invalid_negative_count", 0) > 0:
+        st.info(
+            "Negative consumption readings were removed because they are invalid for this energy dataset. "
+            "Review the data quality section for the count and affected dates."
+        )
 
 
 def render_empty_state() -> None:
@@ -504,19 +952,19 @@ def render_downloads(filtered_df: pd.DataFrame, cleaned_df: pd.DataFrame, summar
     st.sidebar.download_button(
         label="Download filtered data",
         data=filtered_df.to_csv(index=False),
-        file_name="up_electricity_filtered.csv",
+        file_name="india_electricity_filtered.csv",
         mime="text/csv",
     )
     st.sidebar.download_button(
         label="Download cleaned data",
         data=cleaned_df.to_csv(index=False),
-        file_name="up_electricity_cleaned.csv",
+        file_name="india_electricity_cleaned.csv",
         mime="text/csv",
     )
     st.sidebar.download_button(
         label="Download insight summary",
         data=summary_text,
-        file_name="up_electricity_summary.txt",
+        file_name="india_electricity_summary.txt",
         mime="text/plain",
     )
 
@@ -525,8 +973,8 @@ def main() -> None:
     if "dark_mode" not in st.session_state:
         st.session_state.dark_mode = False
 
-    st.sidebar.title("Uttar Pradesh Electricity Consumption Dashboard")
-    st.sidebar.caption("Daily electricity consumption analytics for Uttar Pradesh")
+    st.sidebar.title("India Electricity Consumption Dashboard")
+    st.sidebar.caption("Interactive electricity consumption analytics for India")
     st.sidebar.markdown("---")
     st.sidebar.checkbox("Dark mode", key="dark_mode")
 
@@ -542,8 +990,8 @@ def main() -> None:
     filtered_df = apply_filters(df, filters)
 
     style_header(
-        "Uttar Pradesh Electricity Consumption Dashboard",
-        "Interactive electricity consumption analytics for Uttar Pradesh",
+        "India Electricity Consumption Dashboard",
+        "Interactive electricity consumption analytics for India",
     )
 
     if filtered_df.empty:
@@ -552,9 +1000,17 @@ def main() -> None:
 
     render_downloads(filtered_df, df, "\n".join(generate_insights(filtered_df)))
 
-    page = st.sidebar.radio("Navigation", ["Overview", "Insights", "Data Quality"], index=0)
+    page = st.sidebar.radio(
+        "Navigation",
+        ["Overview", "Map & Forecast", "Drill-down", "Insights", "Data Quality"],
+        index=0,
+    )
     if page == "Overview":
         render_overview(filtered_df)
+    elif page == "Map & Forecast":
+        render_map_forecast(filtered_df)
+    elif page == "Drill-down":
+        render_drill_down(filtered_df, filters)
     elif page == "Insights":
         render_insights(filtered_df)
     else:
@@ -563,8 +1019,8 @@ def main() -> None:
     st.markdown(
         f"""
         <div style="margin-top: 1.2rem; padding: 0.9rem 1rem; border-top: 1px solid {THEME['border']}; color:{THEME['muted']}; font-size:0.9rem; line-height: 1.55;">
-            <strong style="color:{THEME['text']};">Focus areas:</strong> Daily consumption monitoring, monthly averages, and yearly trend analysis<br>
-            <strong style="color:{THEME['text']};">Key metrics:</strong> Average, peak, minimum, latest, and total electricity consumption in MW
+            <strong style="color:{THEME['text']};">Focus areas:</strong> Geographic state-level consumption, trend forecasting, anomaly detection, and seasonal drill-downs.<br>
+            <strong style="color:{THEME['text']};">Key metrics:</strong> Average, peak, minimum, latest, and total electricity consumption in MW.
         </div>
         """,
         unsafe_allow_html=True,
